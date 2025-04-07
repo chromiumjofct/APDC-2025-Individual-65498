@@ -11,6 +11,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import jakarta.ws.rs.GET;
+import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
@@ -56,7 +57,7 @@ public class ComputationResource {
 	@GET
 	@Path("/compute")
 	public Response triggerExecuteComputeTask() throws IOException {
-		String projectId = "quantum-shard-415522";
+		String projectId = "jedi-master-v5-453321";
 		String queueName = "Default";
 		String location = "europe-west6";
 		LOG.log(Level.INFO, projectId + " :: " + queueName + " :: " + location );
@@ -72,4 +73,18 @@ public class ComputationResource {
 		} 
 		return Response.ok().build();
 	}
+	
+	@POST
+	@Path("/compute")
+	public Response executeComputeTask() {
+		LOG.fine("Starting to execute computation tasks");
+		try {
+			Thread.sleep(60*1000*10); //10 min...
+		} catch(Exception e) {
+			LOG.logp(Level.SEVERE,  this.getClass().getCanonicalName(), "executeComputeTask", "An exception has occured");
+			return Response.serverError().build();
+		} //Simulates 60s execution
+		return Response.ok().build();
+	}
+	
 }
