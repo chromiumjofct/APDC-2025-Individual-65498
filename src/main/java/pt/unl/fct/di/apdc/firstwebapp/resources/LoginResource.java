@@ -84,6 +84,7 @@ public class LoginResource {
 	public Response doLoginV1(LoginData data) {
 		LOG.fine(LOG_MESSAGE_LOGIN_ATTEMP + data.username);
 
+		// Recupera a entidade do usuário a partir do Datastore
 		Key userKey = userKeyFactory.newKey(data.username);
 		Entity user = datastore.get(userKey);
 
@@ -91,10 +92,26 @@ public class LoginResource {
 			String hashedPWD = user.getString(USER_PWD);
 			if (hashedPWD.equals(DigestUtils.sha512Hex(data.password))) {
 				LOG.info(LOG_MESSAGE_LOGIN_SUCCESSFUL + data.username);
-				// Extrai o role do usuário; se não existir, usa "enduser" como padrão
+
 				String role = user.contains("role") ? user.getString("role") : "enduser";
-				// Cria o token com USER, ROLE e VALIDITY (com valid_from, valid_to e verificator)
+
 				AuthToken token = new AuthToken(data.username, role);
+
+				Key tokenKey = datastore.newKeyFactory()
+						.setKind("AuthToken")
+						.newKey(token.validity.verificator);
+
+
+				Entity tokenEntity = Entity.newBuilder(tokenKey)
+						.set("username", token.username)
+						.set("role", token.role)
+						.set("valid_from", token.validity.valid_from)
+						.set("valid_to", token.validity.valid_to)
+						.set("verificator", token.validity.verificator)
+						.build();
+
+				datastore.put(tokenEntity);
+
 				return Response.ok(g.toJson(token)).build();
 			} else {
 				LOG.warning(LOG_MESSAGE_WRONG_PASSWORD + data.username);
@@ -109,6 +126,8 @@ public class LoginResource {
 					.build();
 		}
 	}
+
+
 
 
 

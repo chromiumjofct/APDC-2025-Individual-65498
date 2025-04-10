@@ -9,7 +9,8 @@ public class AuthToken {
 	public String role;
 	public Validity validity;
 
-	public static final long EXPIRATION_TIME = 1000 * 60 * 60 * 2; // 2 horas de validade
+	// Define o período de validade: neste exemplo, 2 horas
+	public static final long EXPIRATION_TIME = 1000 * 60 * 60 * 2;
 
 	public AuthToken() { }
 
