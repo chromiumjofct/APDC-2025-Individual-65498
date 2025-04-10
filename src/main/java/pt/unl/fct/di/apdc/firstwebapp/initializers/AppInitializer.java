@@ -28,7 +28,7 @@ public class AppInitializer implements ServletContextListener {
             // Criação da conta "root"
             rootUser = Entity.newBuilder(rootKey)
                     .set("user_name", "Administrador")
-                    .set("user_pwd", DigestUtils.sha512Hex("suaSenhaRoot")) // Substitua "suaSenhaRoot" pela senha desejada
+                    .set("user_pwd", DigestUtils.sha512Hex("abc123")) // Substitua "suaSenhaRoot" pela senha desejada
                     .set("user_email", "root@seuDominio.com")
                     .set("user_creation_time", Timestamp.now())
                     .set("role", "ADMIN")
