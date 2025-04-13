@@ -2,22 +2,20 @@ package pt.unl.fct.di.apdc.firstwebapp.util;
 
 public class ChangeAccountAttributesData {
 
-    // Indica qual conta (username ou outro identificador) se quer modificar
     private String targetUsername;
 
-    // Atributos que podem ser atualizados - esses campos podem ser opcionais
-    private String newUserName;         // Correspondente a "user_name" (nome do utilizador)
-    private String newEmail;            // Correspondente a "user_email"
-    private String newPhone;            // "user_phone"
-    private String newAccountProfile;   // "account_profile"
-    private String newCcNumber;         // Número de cartão do cidadão
-    private String newNif;              // NIF do utilizador
-    private String newJobEntity;        // Entidade empregadora, ex: "Smart Forest S.A."
-    private String newJob;              // Função, ex: "Professor", "Estudante", etc.
-    private String newAdress;           // Morada, ex: “Rua dos alunos de APDC2324, No 100, Piso 2, Porta 116”
-    private String newJobEntityNif;     // NIF da entidade empregadora
-    private String newRole;             // NOVO role (apenas ADMIN pode alterar)
-    private String newAccountStatus;    // Novo estado da conta (apenas ADMIN pode alterar)
+    private String newUserName;
+    private String newEmail;
+    private String newPhone;
+    private String newAccountProfile;
+    private String newCcNumber;
+    private String newNif;
+    private String newJobEntity;
+    private String newJob;
+    private String newAdress;
+    private String newJobEntityNif;
+    private String newRole;
+    private String newAccountStatus;
 
     // Getters e setters
     public String getTargetUsername() {

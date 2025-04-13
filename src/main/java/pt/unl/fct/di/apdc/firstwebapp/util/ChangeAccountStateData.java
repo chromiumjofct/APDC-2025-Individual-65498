@@ -1,22 +1,13 @@
 package pt.unl.fct.di.apdc.firstwebapp.util;
 
-/**
- * Classe para mapear os dados recebidos na requisição de mudança de estado de conta.
- * Os valores aceitos para o novo estado são: ATIVADA, SUSPENSA ou DESATIVADA.
- *
- * Exemplo de JSON de input:
- * {
- *   "targetUsername": "jose123",
- *   "newState": "ATIVADA"
- * }
- */
+
 public class ChangeAccountStateData {
 
     private String targetUsername;
-    private String newState; // Valor esperado: "ATIVADA", "SUSPENSA" ou "DESATIVADA"
+    private String newState;
 
     public ChangeAccountStateData() {
-        // Construtor padrão para deserialização JSON
+
     }
 
     public ChangeAccountStateData(String targetUsername, String newState) {
@@ -40,11 +31,8 @@ public class ChangeAccountStateData {
         this.newState = newState;
     }
 
-    /**
-     * Metodo utilitário para verificar se o novo estado é válido.
-     *
-     * @return true se newState for ATIVADA, SUSPENSA ou DESATIVADA (ignorando maiúsculas/minúsculas); false caso contrário.
-     */
+
+
     public boolean isValidState() {
         if (newState == null) {
             return false;

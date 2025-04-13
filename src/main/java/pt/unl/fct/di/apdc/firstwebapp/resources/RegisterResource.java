@@ -37,7 +37,7 @@ public class RegisterResource {
 	public Response registerUser(RegisterData data) {
 		LOG.fine("Tentativa de registo do utilizador: " + data.username);
 
-		// Verifica os parâmetros de registo
+
 		if (!data.validRegistration()) {
 			return Response.status(Status.BAD_REQUEST)
 					.entity("Parâmetros em falta ou incorretos.")
@@ -49,7 +49,7 @@ public class RegisterResource {
 			Key userKey = datastore.newKeyFactory().setKind("User").newKey(data.username);
 			Entity existingUser = txn.get(userKey);
 
-			// Se o utilizador já existir, aborta a operação
+
 			if (existingUser != null) {
 				txn.rollback();
 				return Response.status(Status.CONFLICT)
@@ -57,7 +57,7 @@ public class RegisterResource {
 						.build();
 			}
 
-			// Cria o novo registo com os atributos obrigatórios e iniciais
+
 			Entity.Builder builder = Entity.newBuilder(userKey)
 					.set("user_name", data.name)
 					.set("user_email", data.email)
@@ -68,7 +68,6 @@ public class RegisterResource {
 					.set("role", "enduser")
 					.set("account_status", "DESATIVADA");
 
-			// Atributos adicionais opcionais
 			if (data.cc_number != null && !data.cc_number.isBlank()) {
 				builder.set("cc_number", data.cc_number);
 			}

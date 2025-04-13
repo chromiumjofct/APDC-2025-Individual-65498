@@ -11,7 +11,6 @@ import com.google.cloud.datastore.Key;
 import com.google.cloud.datastore.KeyFactory;
 import com.google.cloud.datastore.Query;
 import com.google.cloud.datastore.QueryResults;
-import com.google.cloud.datastore.StructuredQuery;
 import com.google.cloud.datastore.StructuredQuery.PropertyFilter;
 import com.google.gson.Gson;
 
@@ -34,18 +33,17 @@ public class RemoveUserAccountResource {
     private static final Logger LOG = Logger.getLogger(RemoveUserAccountResource.class.getName());
     private static final Datastore datastore = DatastoreOptions.getDefaultInstance().getService();
 
-    // Tokens: as entidades de token são do Kind "AuthToken" e possuem um campo "username"
-    // para associá-las ao usuário.
+    // KeyFactory for AuthToken entities – here the key name is the token string.
     private static final KeyFactory tokenKeyFactory = datastore.newKeyFactory().setKind("AuthToken");
 
-    // Usuários: entidades do Kind "User", com key igual ao username (ou outro identificador único)
+    // KeyFactory for User entities – we assume that the key is the user's username.
     private static final KeyFactory userKeyFactory = datastore.newKeyFactory().setKind("User");
 
     private final Gson g = new Gson();
 
     @POST
     public Response removeUser(@Context HttpHeaders headers, RemoveUserAccountData data) {
-        // 1. Extrair o token do cabeçalho "Authorization"
+        // 1. Extract the token from the "Authorization" header.
         String authHeader = headers.getHeaderString("Authorization");
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             return Response.status(Status.FORBIDDEN)
@@ -59,7 +57,7 @@ public class RemoveUserAccountResource {
                     .build();
         }
 
-        // 2. Buscar a entidade do token na datastore (supondo que o token é a keyName)
+        // 2. Look up the token entity in the datastore.
         Key tokenKey = tokenKeyFactory.newKey(tokenStr);
         Entity tokenEntity = datastore.get(tokenKey);
         if (tokenEntity == null) {
@@ -68,7 +66,7 @@ public class RemoveUserAccountResource {
                     .build();
         }
 
-        // 3. Verificar se o token está expirado
+        // 3. Check if the token is expired by comparing the 'valid_to' timestamp.
         long expirationTime = tokenEntity.getTimestamp("valid_to").toDate().getTime();
         long now = System.currentTimeMillis();
         if (now > expirationTime) {
@@ -77,18 +75,18 @@ public class RemoveUserAccountResource {
                     .build();
         }
 
-        // 4. Recuperar informações do token: usuário autenticado e role
+        // 4. Retrieve the authenticated user's username and role from the token.
         String authUsername = tokenEntity.getString("username");
         String authUserRole = tokenEntity.getString("role").toUpperCase();
 
-        // 5. Validar o corpo da requisição
+        // 5. Validate that the request body contains the target username.
         if (data.getTargetUsername() == null || data.getTargetUsername().isBlank()) {
             return Response.status(Status.BAD_REQUEST)
                     .entity("{\"error\": \"Missing targetUsername in request body\"}")
                     .build();
         }
 
-        // 6. Buscar o usuário alvo na datastore
+        // 6. Look up the target user entity in the datastore.
         Key targetUserKey = userKeyFactory.newKey(data.getTargetUsername());
         Entity targetUser = datastore.get(targetUserKey);
         if (targetUser == null) {
@@ -97,13 +95,14 @@ public class RemoveUserAccountResource {
                     .build();
         }
 
+        // Get the target user's role, defaulting to ENDUSER if not defined.
         String targetRole = targetUser.contains("role")
                 ? targetUser.getString("role").toUpperCase()
                 : "ENDUSER";
 
-        // 7. Verificar permissão:
-        // - ADMIN pode remover qualquer conta.
-        // - BACKOFFICE pode remover se o target user tiver role ENDUSER ou PARTNER.
+        // 7. Check if the authenticated user has permission to remove the target user.
+        //    ADMIN can remove any account.
+        //    BACKOFFICE can remove if the target has role ENDUSER or PARTNER.
         boolean allowed = false;
         if ("ADMIN".equals(authUserRole)) {
             allowed = true;
@@ -118,8 +117,8 @@ public class RemoveUserAccountResource {
                     .build();
         }
 
-        // 8. Remover o usuário alvo
-        // Primeiro, deletar todos os tokens do usuário (buscando tokens pelo campo "username")
+        // 8. Remove the target user account.
+        // First, delete all token entities related to the target user.
         Query<Key> queryTokens = Query.newKeyQueryBuilder()
                 .setKind("AuthToken")
                 .setFilter(PropertyFilter.eq("username", data.getTargetUsername()))
@@ -131,12 +130,14 @@ public class RemoveUserAccountResource {
             tokenKeysToDelete.add(tokenKeysResults.next());
         }
 
-        // Acrescentar a key do usuário para remoção
+        // Add the target user's key to the deletion list.
         tokenKeysToDelete.add(targetUserKey);
 
+        // Delete all the collected keys.
         datastore.delete(tokenKeysToDelete.toArray(new Key[0]));
 
-        LOG.info("User " + data.getTargetUsername() + " removed by " + authUsername + " with role " + authUserRole);
+        LOG.info("User " + data.getTargetUsername() + " removed successfully by " + authUsername +
+                " with role " + authUserRole);
         String msg = String.format("{\"message\": \"User '%s' removed successfully\"}", data.getTargetUsername());
         return Response.ok(msg).build();
     }

@@ -26,24 +26,25 @@ public class SessionLogoutResource {
 
     private static final Logger LOG = Logger.getLogger(SessionLogoutResource.class.getName());
 
-    // Instância do Datastore
+    // Instantiate the Datastore service.
     private static final Datastore datastore = DatastoreOptions.getDefaultInstance().getService();
-    // KeyFactory para as entidades do token: Kind "AuthToken"
+
+    // KeyFactory for AuthToken entities. In this implementation, the token string is used as the key.
     private static final KeyFactory tokenKeyFactory = datastore.newKeyFactory().setKind("AuthToken");
 
     private final Gson g = new Gson();
 
     /**
-     * Endpoint para Logout de sessão.
-     * O cliente deve enviar o token no header "Authorization" no formato:
+     * Endpoint for session logout.
+     * The client must send the token in the "Authorization" header in the format:
      *     Authorization: Bearer <token>
      *
-     * Se o token existir e não estiver expirado, ele é removido da datastore.
-     * Após o logout, este token não poderá mais ser usado.
+     * If the token is found in the datastore, it is removed.
+     * After logout the token cannot be used again.
      */
     @POST
     public Response logout(@Context HttpHeaders headers) {
-        // 1. Extrair o token do header "Authorization"
+        // 1. Extract the token from the "Authorization" header.
         String authHeader = headers.getHeaderString("Authorization");
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             return Response.status(Status.FORBIDDEN)
@@ -57,19 +58,17 @@ public class SessionLogoutResource {
                     .build();
         }
 
-        // 2. Buscar a entidade do token na Datastore
+        // 2. Retrieve the token entity from the datastore.
         Key tokenKey = tokenKeyFactory.newKey(tokenStr);
         Entity tokenEntity = datastore.get(tokenKey);
         if (tokenEntity == null) {
-            // Podemos considerar o logout como "já efetuado" se o token não for encontrado
+            // It is acceptable to consider logout successful if the token is not found.
             return Response.status(Status.OK)
                     .entity("{\"message\": \"Token not found or already revoked\"}")
                     .build();
         }
 
-        // 3. (Opcional) Poderíamos verificar a expiração do token, se essa informação estiver armazenada;
-        //    para este exemplo, vamos apenas removê-lo.
-
+        // Delete the token entity from the datastore.
         datastore.delete(tokenKey);
         LOG.info("Token " + tokenStr + " revoked successfully.");
         return Response.ok("{\"message\": \"Logout successful\"}").build();

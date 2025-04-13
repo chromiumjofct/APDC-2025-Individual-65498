@@ -1,10 +1,21 @@
 package pt.unl.fct.di.apdc.firstwebapp.resources;
 
+import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.Date;
 import java.util.logging.Logger;
 
 import com.google.cloud.Timestamp;
-import com.google.cloud.datastore.*;
+import com.google.cloud.datastore.Datastore;
+import com.google.cloud.datastore.DatastoreOptions;
+import com.google.cloud.datastore.Entity;
+import com.google.cloud.datastore.Key;
+import com.google.cloud.datastore.KeyFactory;
+import com.google.cloud.datastore.NullValue;
+import com.google.cloud.datastore.Query;
+import com.google.cloud.datastore.Transaction;
+import com.google.cloud.datastore.QueryResults;
+import com.google.cloud.datastore.TimestampValue;
 import com.google.gson.Gson;
 
 import jakarta.ws.rs.Consumes;
@@ -23,19 +34,30 @@ import pt.unl.fct.di.apdc.firstwebapp.util.CreateWorkSheetData;
 @Consumes(MediaType.APPLICATION_JSON)
 public class CreateWorkSheetResource {
 
+    // Logger for logging events in this resource.
     private static final Logger LOG = Logger.getLogger(CreateWorkSheetResource.class.getName());
 
+    // Datastore instance obtained from the default options.
     private static final Datastore datastore = DatastoreOptions.getDefaultInstance().getService();
+
+    // KeyFactory for AuthToken entities.
     private static final KeyFactory tokenKeyFactory = datastore.newKeyFactory().setKind("AuthToken");
+
+    // KeyFactory for WorkSheet entities.
     private static final KeyFactory workSheetKeyFactory = datastore.newKeyFactory().setKind("WorkSheet");
 
     private final Gson g = new Gson();
 
+    /**
+     * Endpoint to create or update a worksheet.
+     * It uses the "reference" as the unique identifier.
+     * Based on the awardingStatus and the user role,
+     * it either creates a new worksheet or updates an existing one.
+     */
     @POST
     @Path("/create")
     public Response createOrUpdateWorkSheet(@Context HttpHeaders headers, CreateWorkSheetData data) {
-
-        // 1. Extrair token do cabeçalho Authorization
+        // 1. Extract the token from the "Authorization" header.
         String authHeader = headers.getHeaderString("Authorization");
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             return Response.status(Status.FORBIDDEN)
@@ -49,7 +71,7 @@ public class CreateWorkSheetResource {
                     .build();
         }
 
-        // 2. Buscar a entidade do token
+        // 2. Look up the token entity in Datastore using the token string as the key.
         Key tokenKey = tokenKeyFactory.newKey(tokenStr);
         Entity tokenEntity = datastore.get(tokenKey);
         if (tokenEntity == null) {
@@ -58,68 +80,62 @@ public class CreateWorkSheetResource {
                     .build();
         }
 
-        // 3. Verificar se o token está expirado (valid_to no formato Timestamp)
+        // 3. Check if the token is expired.
         Timestamp validToTs = tokenEntity.getTimestamp("valid_to");
         long now = System.currentTimeMillis();
-        if (validToTs != null && now > validToTs.toDate().getTime()) {
+        if (validToTs == null || now > validToTs.toDate().getTime()) {
             return Response.status(Status.FORBIDDEN)
                     .entity("{\"error\": \"Token expired\"}")
                     .build();
         }
 
-        // 4. Recuperar informações do token: usuário autenticado e role
+        // 4. Retrieve the authenticated username from the token.
         String authUsername = tokenEntity.getString("username");
-        String authUserRole = tokenEntity.getString("role").toUpperCase();
 
-        // 5. Validação básica dos atributos obrigatórios
+        // 5. Validate that the mandatory fields are present.
         if (data.reference == null || data.reference.isBlank() ||
                 data.description == null || data.description.isBlank() ||
                 data.targetType == null   || data.targetType.isBlank() ||
                 data.awardingStatus == null || data.awardingStatus.isBlank()) {
-
             return Response.status(Status.BAD_REQUEST)
                     .entity("{\"error\": \"Missing mandatory fields: reference, description, targetType, awardingStatus\"}")
                     .build();
         }
 
-        // Normalizamos awardingStatus para maiúsculo
+        // Convert awardingStatus to uppercase for consistency.
         String awardingStatus = data.awardingStatus.toUpperCase();
 
-        // 6. Obter ou criar a key da WorkSheet no Datastore
+        // 6. Create or retrieve the WorkSheet entity.
         Key workSheetKey = workSheetKeyFactory.newKey(data.reference);
-
-        // 7. Buscamos se já existe uma WorkSheet com essa referência
         Entity existingWorksheet = datastore.get(workSheetKey);
 
-        // 8. Verificar permissões
-        // Se a worksheet não existe, somente BACKOFFICE pode criar
+        // 7. Authorization: Only BACKOFFICE can create a new worksheet if it doesn't exist.
         if (existingWorksheet == null) {
-            if (!"BACKOFFICE".equals(authUserRole)) {
+            if (!"BACKOFFICE".equalsIgnoreCase(tokenEntity.getString("role"))) {
                 return Response.status(Status.FORBIDDEN)
                         .entity("{\"error\": \"Only BACKOFFICE can create new worksheets\"}")
                         .build();
             }
         } else {
-            // Se a worksheet já existe, PARTNER pode atualizar somente o estado da obra e observações
-            // se for a parceira atribuída.
-            // BACKOFFICE pode atualizar qualquer campo.
+            // If the worksheet exists, additional rules might apply for updating.
+            // For example, PARTNER can only update the work state and observations
+            // if they are the assigned partner (this logic is handled below).
         }
 
-        // Vamos construir ou atualizar a entidade com a transação (opcional)
+        // 8. Start building the worksheet entity
         Transaction txn = datastore.newTransaction();
         try {
             Entity.Builder builder;
             if (existingWorksheet == null) {
-                // Criando nova WorkSheet
+                // Building a new worksheet with the mandatory fields.
                 builder = Entity.newBuilder(workSheetKey)
                         .set("reference", data.reference)
                         .set("description", data.description)
                         .set("targetType", data.targetType)
                         .set("awardingStatus", awardingStatus);
 
-                // Campos de adjudicação só se awardingStatus = "ADJUDICADO" e role=BACKOFFICE
+                // If the worksheet is adjudicated, populate the adjudication fields.
                 if ("ADJUDICADO".equals(awardingStatus)) {
-                    // Preenche dados de adjudicação
                     builder.set("awardingDate", data.awardingDate == null
                             ? NullValue.of()
                             : TimestampValue.of(Timestamp.of(data.awardingDate)));
@@ -135,7 +151,7 @@ public class CreateWorkSheetResource {
                     builder.set("workState", data.workState == null ? "NÃO INICIADO" : data.workState);
                     builder.set("observations", data.observations == null ? "" : data.observations);
                 } else {
-                    // awardingStatus = "NÃO ADJUDICADO"
+                    // If not adjudicated, set all adjudication-related fields to empty or null.
                     builder.set("awardingDate", NullValue.of())
                             .set("startDate", NullValue.of())
                             .set("endDate", NullValue.of())
@@ -146,13 +162,10 @@ public class CreateWorkSheetResource {
                             .set("observations", "");
                 }
             } else {
-                // Atualizando WorkSheet existente
-                // Carregar dados atuais
+                // For existing worksheets, start with the current entity.
                 builder = Entity.newBuilder(existingWorksheet);
-
-                // Verificamos se o usuário é BACKOFFICE
-                if ("BACKOFFICE".equals(authUserRole)) {
-                    // Pode atualizar tudo
+                // BACKOFFICE users can update all fields if desired.
+                if ("BACKOFFICE".equalsIgnoreCase(tokenEntity.getString("role"))) {
                     builder.set("description", data.description)
                             .set("targetType", data.targetType)
                             .set("awardingStatus", awardingStatus);
@@ -170,17 +183,14 @@ public class CreateWorkSheetResource {
                         builder.set("partnerAccount", data.partnerAccount == null ? "" : data.partnerAccount);
                         builder.set("awardingEntity", data.awardingEntity == null ? "" : data.awardingEntity);
                         builder.set("awardingNif", data.awardingNif == null ? "" : data.awardingNif);
-                        // Se não houver state, assumimos "NÃO INICIADO" caso já não esteja setado
                         String currentState = existingWorksheet.contains("workState")
                                 ? existingWorksheet.getString("workState") : "";
                         builder.set("workState", data.workState == null ? currentState : data.workState);
-                        // Observations
                         String currentObs = existingWorksheet.contains("observations")
                                 ? existingWorksheet.getString("observations") : "";
                         builder.set("observations", data.observations == null ? currentObs : data.observations);
-
                     } else {
-                        // awardingStatus = "NÃO ADJUDICADO" => zera os campos de adjudicação
+                        // Reset adjudication fields when not adjudicated
                         builder.set("awardingDate", NullValue.of())
                                 .set("startDate", NullValue.of())
                                 .set("endDate", NullValue.of())
@@ -190,40 +200,36 @@ public class CreateWorkSheetResource {
                                 .set("workState", "")
                                 .set("observations", "");
                     }
-                }
-                // Se for PARTNER, só pode atualizar "workState" e "observations"
-                else if ("PARTNER".equals(authUserRole)) {
-                    // Somente se awardingStatus = "ADJUDICADO" e partnerAccount = authUsername
+                } else if ("PARTNER".equalsIgnoreCase(tokenEntity.getString("role"))) {
+                    // A partner is allowed to update only workState and observations if they are assigned.
                     String currentAwardStatus = existingWorksheet.getString("awardingStatus");
                     String currentPartner = existingWorksheet.getString("partnerAccount");
                     if (!"ADJUDICADO".equalsIgnoreCase(currentAwardStatus) ||
                             !currentPartner.equals(authUsername)) {
                         return Response.status(Status.FORBIDDEN)
-                                .entity("{\"error\": \"You are not the partner assigned or awardingStatus != ADJUDICADO\"}")
+                                .entity("{\"error\": \"You are not the assigned partner or the worksheet is not adjudicated\"}")
                                 .build();
                     }
-                    // Atualiza somente o estado e as observações
-                    String newState = data.workState; // "NÃO INICIADO", "EM CURSO", "CONCLUÍDO"
-                    if (newState != null && !newState.isBlank()) {
-                        builder.set("workState", newState);
+                    if (data.workState != null && !data.workState.isBlank()) {
+                        builder.set("workState", data.workState);
                     }
                     if (data.observations != null) {
                         builder.set("observations", data.observations);
                     }
                 } else {
-                    // Se for outro role (ENDUSER, ADMIN, etc.), decide se permite ou não
-                    // Aqui, assumimos que não pode modificar
+                    // Other roles are not permitted to update existing worksheets.
                     return Response.status(Status.FORBIDDEN)
                             .entity("{\"error\": \"This role cannot modify existing worksheets\"}")
                             .build();
                 }
             }
 
+            // 9. Save the new or updated worksheet entity within the transaction.
             Entity finalWorksheet = builder.build();
             txn.put(finalWorksheet);
             txn.commit();
 
-            // Retorna a entidade em JSON
+            // 10. Convert the entity into a response-friendly JSON representation.
             return Response.ok(g.toJson(entityToWorkSheetResponse(finalWorksheet))).build();
 
         } catch (Exception e) {
@@ -240,12 +246,10 @@ public class CreateWorkSheetResource {
     }
 
     /**
-     * Converte a entidade em uma representação JSON básica.
-     * Pode customizar conforme desejar.
+     * Converts the worksheet entity to a response object.
+     * Fields that are not defined are returned as null.
      */
     private Object entityToWorkSheetResponse(Entity e) {
-        // Monta um Map ou um objeto anônimo
-        // Observando que datas armazenadas como Timestamp podem ser convertidas para Date
         return new Object() {
             public String reference        = e.getKey().getName();
             public String description      = e.getString("description");
@@ -256,17 +260,12 @@ public class CreateWorkSheetResource {
             public String awardingNif      = e.contains("awardingNif")    ? e.getString("awardingNif")    : null;
             public String workState        = e.contains("workState")      ? e.getString("workState")      : null;
             public String observations     = e.contains("observations")   ? e.getString("observations")   : null;
-
-            // Exemplo de como extrair timestamps
             public Date awardingDate       = e.contains("awardingDate") && !e.isNull("awardingDate")
-                    ? e.getTimestamp("awardingDate").toDate()
-                    : null;
+                    ? e.getTimestamp("awardingDate").toDate() : null;
             public Date startDate          = e.contains("startDate") && !e.isNull("startDate")
-                    ? e.getTimestamp("startDate").toDate()
-                    : null;
+                    ? e.getTimestamp("startDate").toDate() : null;
             public Date endDate            = e.contains("endDate") && !e.isNull("endDate")
-                    ? e.getTimestamp("endDate").toDate()
-                    : null;
+                    ? e.getTimestamp("endDate").toDate() : null;
         };
     }
 }

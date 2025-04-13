@@ -28,20 +28,22 @@ import pt.unl.fct.di.apdc.firstwebapp.util.ChangePasswordData;
 @Consumes(MediaType.APPLICATION_JSON)
 public class ChangePasswordResource {
 
+    // Logger for logging events
     private static final Logger LOG = Logger.getLogger(ChangePasswordResource.class.getName());
 
-    // Datastore
+    // Obtain the Datastore service
     private static final Datastore datastore = DatastoreOptions.getDefaultInstance().getService();
-    // KeyFactory para as entidades do tipo "User"
+
+    // KeyFactory for User entities; User keys are based on the username
     private static final KeyFactory userKeyFactory = datastore.newKeyFactory().setKind("User");
-    // KeyFactory para as entidades do token, Kind "AuthToken"
+    // KeyFactory for AuthToken entities; here the token string is used as the key name
     private static final KeyFactory tokenKeyFactory = datastore.newKeyFactory().setKind("AuthToken");
 
     private final Gson g = new Gson();
 
     @POST
     public Response changePassword(@Context HttpHeaders headers, ChangePasswordData data) {
-        // 1. Validação dos campos obrigatórios do input
+        // Check that all required password fields are provided in the input.
         if (data.getOldPassword() == null || data.getOldPassword().isBlank() ||
                 data.getNewPassword() == null || data.getNewPassword().isBlank() ||
                 data.getConfirmPassword() == null || data.getConfirmPassword().isBlank()) {
@@ -50,21 +52,20 @@ public class ChangePasswordResource {
                     .build();
         }
 
-        // Verifica se a nova senha coincide com a confirmação
+        // Verify that the new password and confirmation match.
         if (!data.getNewPassword().equals(data.getConfirmPassword())) {
             return Response.status(Status.BAD_REQUEST)
                     .entity("{\"error\": \"New password and confirmation do not match\"}")
                     .build();
         }
 
-        // 2. Extração e validação do token no header "Authorization"
+        // Extract the token from the Authorization header.
         String authHeader = headers.getHeaderString("Authorization");
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             return Response.status(Status.FORBIDDEN)
                     .entity("{\"error\": \"Missing or invalid authorization header\"}")
                     .build();
         }
-
         String tokenStr = authHeader.substring("Bearer ".length()).trim();
         if (tokenStr.isBlank()) {
             return Response.status(Status.FORBIDDEN)
@@ -72,7 +73,7 @@ public class ChangePasswordResource {
                     .build();
         }
 
-        // 3. Buscar a entidade do token na datastore
+        // Look up the token entity from the datastore by its key.
         Key tokenKey = tokenKeyFactory.newKey(tokenStr);
         Entity tokenEntity = datastore.get(tokenKey);
         if (tokenEntity == null) {
@@ -81,7 +82,7 @@ public class ChangePasswordResource {
                     .build();
         }
 
-        // 4. Verificar se o token está expirado
+        // Check if the token is expired by comparing its "valid_to" timestamp with the current time.
         Timestamp validTo = tokenEntity.getTimestamp("valid_to");
         long now = System.currentTimeMillis();
         if (validTo == null || now > validTo.toDate().getTime()) {
@@ -90,10 +91,10 @@ public class ChangePasswordResource {
                     .build();
         }
 
-        // 5. Obter o username do token; assim o usuário só pode alterar a senha da própria conta
+        // Get the username from the token so that the user can only change their own password.
         String authUsername = tokenEntity.getString("username");
 
-        // 6. Buscar a entidade do usuário na datastore
+        // Retrieve the User entity from the datastore using the authenticated username.
         Key userKey = userKeyFactory.newKey(authUsername);
         Entity userEntity = datastore.get(userKey);
         if (userEntity == null) {
@@ -102,7 +103,7 @@ public class ChangePasswordResource {
                     .build();
         }
 
-        // 7. Validar a senha atual
+        // Validate the current (old) password provided in the request.
         String storedHashedPassword = userEntity.getString("user_pwd");
         if (!storedHashedPassword.equals(DigestUtils.sha512Hex(data.getOldPassword()))) {
             return Response.status(Status.FORBIDDEN)
@@ -110,7 +111,7 @@ public class ChangePasswordResource {
                     .build();
         }
 
-        // 8. Atualizar a senha
+        // All validations passed: generate the new hashed password and update the user entity.
         String newHashedPassword = DigestUtils.sha512Hex(data.getNewPassword());
         Entity updatedUser = Entity.newBuilder(userEntity)
                 .set("user_pwd", newHashedPassword)

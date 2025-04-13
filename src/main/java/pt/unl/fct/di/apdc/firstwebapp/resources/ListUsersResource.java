@@ -19,7 +19,6 @@ import com.google.cloud.datastore.StructuredQuery.PropertyFilter;
 import com.google.cloud.datastore.StructuredQuery;
 import com.google.cloud.datastore.StructuredQuery.Filter;
 import com.google.cloud.datastore.StructuredQuery.CompositeFilter;
-
 import com.google.gson.Gson;
 
 import jakarta.ws.rs.Consumes;
@@ -41,22 +40,22 @@ public class ListUsersResource {
     private static final Logger LOG = Logger.getLogger(ListUsersResource.class.getName());
     private static final Datastore datastore = DatastoreOptions.getDefaultInstance().getService();
 
-    // KeyFactory para as entidades de Token – a partir do Kind "AuthToken"
+    // KeyFactory for AuthToken entities.
     private static final KeyFactory tokenKeyFactory = datastore.newKeyFactory().setKind("AuthToken");
 
-    // KeyFactory para usuários (Kind "User")
+    // KeyFactory for User entities.
     private static final KeyFactory userKeyFactory = datastore.newKeyFactory().setKind("User");
 
     private final Gson g = new Gson();
 
     /**
-     * Endpoint para listar usuários.
-     * A autorização é feita via token Bearer (extraído do cabeçalho Authorization).
-     * O comportamento da listagem depende do role do utilizador autenticado.
+     * Endpoint to list user accounts.
+     * Authorization is based on a Bearer token provided in the Authorization header.
+     * The list returned depends on the role of the authenticated user.
      */
     @POST
     public Response listUsers(@Context HttpHeaders headers, ListUsersData inputData) {
-        // 1. Obter token do header
+        // Get the token from the Authorization header.
         String authHeader = headers.getHeaderString("Authorization");
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             return Response.status(Status.FORBIDDEN)
@@ -70,7 +69,7 @@ public class ListUsersResource {
                     .build();
         }
 
-        // 2. Buscar a entidade do token (chave igual ao token string, neste exemplo)
+        // Retrieve the AuthToken entity using the token string as the key.
         Key tokenKey = tokenKeyFactory.newKey(tokenStr);
         Entity tokenEntity = datastore.get(tokenKey);
         if (tokenEntity == null) {
@@ -79,7 +78,7 @@ public class ListUsersResource {
                     .build();
         }
 
-        // 3. Verificar validade do token
+        // Check whether the token is still valid by comparing the 'valid_to' timestamp with the current time.
         Timestamp validTo = tokenEntity.contains("valid_to") ? tokenEntity.getTimestamp("valid_to") : null;
         if (validTo == null || System.currentTimeMillis() > validTo.toDate().getTime()) {
             return Response.status(Status.FORBIDDEN)
@@ -87,35 +86,34 @@ public class ListUsersResource {
                     .build();
         }
 
-        // 4. Recuperar informações do token
+        // Get the authenticated user's username and role.
         String authUsername = tokenEntity.getString("username");
         String authUserRole = tokenEntity.getString("role").toUpperCase();
 
-        // 5. Determinar os filtros para a consulta baseada no role do usuário autenticado
-        // Variáveis para construção do filtro.
+        // Build query filters based on the role of the requester.
         List<StructuredQuery.Filter> filters = new ArrayList<>();
 
         if ("ENDUSER".equals(authUserRole)) {
-            // ENDUSER: listar apenas contas com role "ENDUSER", com perfil público e estado "ATIVADA"
+            // End users see only accounts with role ENDUSER, public profile, and active account.
             filters.add(PropertyFilter.eq("role", "ENDUSER"));
             filters.add(PropertyFilter.eq("account_profile", "público"));
             filters.add(PropertyFilter.eq("account_status", "ATIVADA"));
         } else if ("BACKOFFICE".equals(authUserRole)) {
-            // BACKOFFICE: pode listar somente contas de usuários com role "ENDUSER" (independente do perfil e estado)
+            // Backoffice users list only accounts with role ENDUSER, regardless of profile or status.
             filters.add(PropertyFilter.eq("role", "ENDUSER"));
         } else if ("ADMIN".equals(authUserRole)) {
-            // ADMIN: não filtra; lista todos os usuários
+            // Admin sees all accounts; no filter is needed.
         } else {
-            // Outros: não têm permissão para visualizar a lista de usuários
+            // Any other role does not have permission.
             return Response.status(Status.FORBIDDEN)
                     .entity("{\"error\": \"Not enough privileges to list users\"}")
                     .build();
         }
 
-        // Construção da consulta
+        // Build the query. If filters are specified, combine them with an AND operation.
         StructuredQuery<Entity> query;
         if (!filters.isEmpty()) {
-            StructuredQuery.Filter[] filterArray = filters.toArray(new StructuredQuery.Filter[filters.size()]);
+            StructuredQuery.Filter[] filterArray = filters.toArray(new StructuredQuery.Filter[0]);
             StructuredQuery.Filter combinedFilter = CompositeFilter.and(filterArray[0], filterArray);
             query = Query.newEntityQueryBuilder()
                     .setKind("User")
@@ -127,19 +125,13 @@ public class ListUsersResource {
                     .build();
         }
 
-
-
-
         QueryResults<Entity> results = datastore.run(query);
 
-        // 6. Montar a resposta de acordo com o role do utilizador autenticado.
-        // Para ENDUSER: retornar apenas username, email e nome.
-        // Para BACKOFFICE: retornar todos os atributos da entidade, mas apenas para usuários com role "ENDUSER"
-        // Para ADMIN: retornar todos os atributos de todas as contas.
+        // Process the query results and construct the response.
         List<Map<String, String>> usersList = new ArrayList<>();
         while (results.hasNext()) {
             Entity userEntity = results.next();
-            // Se BACKOFFICE, garantir que a conta do usuário tem role ENDUSER
+            // For backoffice requests, skip users whose role is not ENDUSER.
             if ("BACKOFFICE".equals(authUserRole)) {
                 String userRole = userEntity.contains("role") ? userEntity.getString("role").toUpperCase() : "ENDUSER";
                 if (!"ENDUSER".equals(userRole)) {
@@ -148,19 +140,18 @@ public class ListUsersResource {
             }
             Map<String, String> userMap = new HashMap<>();
 
-            // Sempre incluir o username (a chave da entidade)
+            // Include the username, which is the entity key.
             String username = userEntity.getKey().getName();
             userMap.put("username", username != null ? username : "NOT DEFINED");
 
-            // Dependendo do role do solicitante, filtramos os atributos
             if ("ENDUSER".equals(authUserRole)) {
-                // Retorna apenas email e nome.
+                // ENDUSER role: Only show email and name.
                 String email = userEntity.contains("user_email") ? userEntity.getString("user_email") : "NOT DEFINED";
                 String name = userEntity.contains("user_name") ? userEntity.getString("user_name") : "NOT DEFINED";
                 userMap.put("email", email);
                 userMap.put("name", name);
             } else {
-                // BACKOFFICE e ADMIN retornam todos os atributos relevantes.
+                // BACKOFFICE and ADMIN: Include more details.
                 String email = userEntity.contains("user_email") ? userEntity.getString("user_email") : "NOT DEFINED";
                 String name = userEntity.contains("user_name") ? userEntity.getString("user_name") : "NOT DEFINED";
                 String profile = userEntity.contains("account_profile") ? userEntity.getString("account_profile") : "NOT DEFINED";
@@ -178,7 +169,6 @@ public class ListUsersResource {
 
             usersList.add(userMap);
         }
-
         return Response.ok(g.toJson(usersList)).build();
     }
 }

@@ -8,6 +8,8 @@ import com.google.cloud.datastore.DatastoreOptions;
 import com.google.cloud.datastore.Entity;
 import com.google.cloud.datastore.Key;
 import com.google.cloud.datastore.KeyFactory;
+import com.google.cloud.datastore.StructuredQuery;
+import com.google.cloud.datastore.StringValue;
 import com.google.gson.Gson;
 
 import jakarta.ws.rs.Consumes;
@@ -26,32 +28,32 @@ import pt.unl.fct.di.apdc.firstwebapp.util.ChangeAccountStateData;
 @Consumes(MediaType.APPLICATION_JSON)
 public class ChangeAccountStateResource {
 
+    // Logger used for logging events
     private static final Logger LOG = Logger.getLogger(ChangeAccountStateResource.class.getName());
+
+    // Datastore service instance
     private static final Datastore datastore = DatastoreOptions.getDefaultInstance().getService();
 
-    // KeyFactory para a entidade de usuário (User)
+    // KeyFactory for the "User" entities
     private static final KeyFactory userKeyFactory = datastore.newKeyFactory().setKind("User");
-    // KeyFactory para a entidade de token (AuthToken)
+    // KeyFactory for the token entities ("AuthToken")
     private static final KeyFactory tokenKeyFactory = datastore.newKeyFactory().setKind("AuthToken");
 
     private final Gson g = new Gson();
 
     /**
-     * Endpoint para mudança de estado de conta.
-     * <p>
-     * Requisitos:
-     * - O header "Authorization" deve conter: "Bearer <token>"
-     * - O corpo JSON deve conter:
-     * - targetUsername: o nome de usuário cujo estado se deseja alterar
-     * - newState: o novo estado a definir (ex.: "ATIVADA" ou "DESATIVADA")
-     * <p>
-     * Exemplos de validação de permissão:
-     * - ADMIN pode mudar qualquer estado.
-     * - BACKOFFICE pode mudar contas se o novo estado for "ATIVADA" ou "DESATIVADA".
+     * REST endpoint to change a user's account state.
+     * Expected JSON payload contains:
+     * - targetUsername: the username whose account state will be updated
+     * - newState: the new account state (for example "ATIVADA" or "DESATIVADA")
+     *
+     * Permissions:
+     * - ADMIN can change the state of any account.
+     * - BACKOFFICE can change the state between "ATIVADA" and "DESATIVADA".
      */
     @POST
     public Response changeAccountState(@Context HttpHeaders headers, ChangeAccountStateData data) {
-        // Obtém o token do header "Authorization"
+        // Extract the Bearer token from the Authorization header.
         String authHeader = headers.getHeaderString("Authorization");
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             return Response.status(Status.FORBIDDEN)
@@ -65,7 +67,8 @@ public class ChangeAccountStateResource {
                     .build();
         }
 
-        // Procura o token na datastore – aqui, supõe-se que o key da entidade AuthToken é o próprio token
+        // Look up the token entity in the datastore.
+        // In this implementation, the token string is used as the key name.
         Key tokenKey = tokenKeyFactory.newKey(tokenStr);
         Entity tokenEntity = datastore.get(tokenKey);
         if (tokenEntity == null) {
@@ -74,7 +77,7 @@ public class ChangeAccountStateResource {
                     .build();
         }
 
-        // Verifica se o token ainda é válido
+        // Check token expiration by verifying that the current time does not exceed the valid_to value.
         Timestamp validToTimestamp = tokenEntity.getTimestamp("valid_to");
         long expirationMillis = validToTimestamp.toDate().getTime();
         if (System.currentTimeMillis() > expirationMillis) {
@@ -83,11 +86,11 @@ public class ChangeAccountStateResource {
                     .build();
         }
 
-        // Recupera o username e o role do token
+        // Retrieve the authenticated user's username and role from the token.
         String authUsername = tokenEntity.getString("username");
         String authUserRole = tokenEntity.getString("role");
 
-        // Recupera o usuário alvo a partir de targetUsername
+        // Retrieve the target user to update using the targetUsername from the request data.
         Key targetUserKey = userKeyFactory.newKey(data.getTargetUsername());
         Entity targetUser = datastore.get(targetUserKey);
         if (targetUser == null) {
@@ -96,17 +99,20 @@ public class ChangeAccountStateResource {
                     .build();
         }
 
+        // Get the current account state and convert newState to uppercase.
         String currentState = targetUser.getString("account_status");
         String newState = data.getNewState().toUpperCase();
 
-        // Valida se o novo estado é um dos valores permitidos
+        // Validate input: if targetUsername is null or newState is invalid, return a bad request.
         if (data.getTargetUsername() == null || !data.isValidState()) {
             return Response.status(Status.BAD_REQUEST)
-                    .entity("{\"error\": \"Dados de entrada inválidos. Verifique targetUsername e newState.\"}")
+                    .entity("{\"error\": \"Invalid input. Check targetUsername and newState.\"}")
                     .build();
         }
 
-        // Verifica permissões de acordo com o role do usuário autenticado
+        // Check permission based on role:
+        // ADMIN is allowed to change any account state.
+        // BACKOFFICE can only switch between ATIVADA and DESATIVADA.
         boolean allowed = false;
         if ("ADMIN".equals(authUserRole)) {
             allowed = true;
@@ -116,21 +122,20 @@ public class ChangeAccountStateResource {
                 allowed = true;
             }
         }
-
         if (!allowed) {
             return Response.status(Status.FORBIDDEN)
                     .entity("{\"error\":\"Permission denied for account state change\"}")
                     .build();
         }
 
-        // Se o estado atual já é igual ao novo estado, não é necessário atualizar
+        // If the current state is the same as the new state, no update is needed.
         if (currentState.equals(newState)) {
             return Response.status(Status.OK)
                     .entity("{\"message\":\"Account state is already " + newState + "\"}")
                     .build();
         }
 
-        // Atualiza o campo 'account_status' do usuário alvo
+        // Update the account_status field of the target user.
         Entity updatedUser = Entity.newBuilder(targetUser)
                 .set("account_status", newState)
                 .build();
@@ -139,7 +144,7 @@ public class ChangeAccountStateResource {
                 " from " + currentState + " to " + newState +
                 " by " + authUsername);
 
-        // Retorna a resposta com os dados atualizados
+        // Return a JSON response with the updated username and new account state.
         String jsonResponse = String.format("{\"username\": \"%s\", \"newAccountState\": \"%s\"}",
                 updatedUser.getKey().getName(), updatedUser.getString("account_status"));
         return Response.ok(jsonResponse).build();

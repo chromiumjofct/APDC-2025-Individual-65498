@@ -67,24 +67,14 @@ public class LoginResource {
 
 
 
-	@GET
-	@Path("/{username}")
-	public Response checkUsernameAvailable(@PathParam("username") String username) {
-		if (username.trim().equals("user")) {
-			return Response.ok().entity(g.toJson(true)).build();
-		} else {
-			return Response.ok().entity(g.toJson(false)).build();
-		}
-	}
+
 
 	@POST
 	@Path("/v1")
 	@Consumes(MediaType.APPLICATION_JSON)
 	@Produces(MediaType.APPLICATION_JSON)
-	public Response doLoginV1(LoginData data) {
+	public Response doLogin(LoginData data) {
 		LOG.fine(LOG_MESSAGE_LOGIN_ATTEMP + data.username);
-
-		// Recupera a entidade do usuário a partir do Datastore
 		Key userKey = userKeyFactory.newKey(data.username);
 		Entity user = datastore.get(userKey);
 
@@ -126,12 +116,6 @@ public class LoginResource {
 					.build();
 		}
 	}
-
-
-
-
-
-
 
 
 	@POST

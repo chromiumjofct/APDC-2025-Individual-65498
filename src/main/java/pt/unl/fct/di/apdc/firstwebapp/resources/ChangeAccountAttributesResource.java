@@ -1,13 +1,18 @@
 package pt.unl.fct.di.apdc.firstwebapp.resources;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.logging.Logger;
 
-import com.google.cloud.Timestamp;
 import com.google.cloud.datastore.Datastore;
 import com.google.cloud.datastore.DatastoreOptions;
 import com.google.cloud.datastore.Entity;
 import com.google.cloud.datastore.Key;
 import com.google.cloud.datastore.KeyFactory;
+import com.google.cloud.datastore.NullValue;
+import com.google.cloud.datastore.Query;
+import com.google.cloud.datastore.StringValue;
+import com.google.cloud.datastore.TimestampValue;
 import com.google.gson.Gson;
 
 import jakarta.ws.rs.Consumes;
@@ -27,18 +32,19 @@ import pt.unl.fct.di.apdc.firstwebapp.util.ChangeAccountAttributesData;
 public class ChangeAccountAttributesResource {
 
     private static final Logger LOG = Logger.getLogger(ChangeAccountAttributesResource.class.getName());
+    // Set up connection to the datastore
     private static final Datastore datastore = DatastoreOptions.getDefaultInstance().getService();
 
-    // KeyFactory para entidades do tipo "User"
+    // KeyFactory for User entities (the user key is based on a unique identifier)
     private static final KeyFactory userKeyFactory = datastore.newKeyFactory().setKind("User");
-    // KeyFactory para entidades de token (tipo "AuthToken")
+    // KeyFactory for token entities
     private static final KeyFactory tokenKeyFactory = datastore.newKeyFactory().setKind("AuthToken");
 
     private final Gson g = new Gson();
 
     @POST
     public Response changeAccountAttributes(@Context HttpHeaders headers, ChangeAccountAttributesData data) {
-        // Extrai o token do header Authorization
+        // Extract the token from the Authorization header
         String authHeader = headers.getHeaderString("Authorization");
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             return Response.status(Status.FORBIDDEN)
@@ -52,8 +58,7 @@ public class ChangeAccountAttributesResource {
                     .build();
         }
 
-        // Procura a entidade do token na datastore.
-        // Nesta implementação, supomos que a key do token é o próprio token
+        // Look up the token entity in the datastore. Here, we assume the token string is used as the key name.
         Key tokenKey = tokenKeyFactory.newKey(tokenStr);
         Entity tokenEntity = datastore.get(tokenKey);
         if (tokenEntity == null) {
@@ -62,26 +67,26 @@ public class ChangeAccountAttributesResource {
                     .build();
         }
 
-        // Verifica se o token está expirado (assumindo que o campo "valid_to" é um Timestamp)
-        Timestamp validTo = tokenEntity.getTimestamp("valid_to");
-        if (validTo == null || System.currentTimeMillis() > validTo.toDate().getTime()) {
+        // Check the token's expiry based on the 'valid_to' timestamp field
+        if (tokenEntity.getTimestamp("valid_to") == null ||
+                System.currentTimeMillis() > tokenEntity.getTimestamp("valid_to").toDate().getTime()) {
             return Response.status(Status.FORBIDDEN)
                     .entity("{\"error\": \"Token expired\"}")
                     .build();
         }
 
-        // Recupera o username e o role do token
+        // Retrieve the authenticated user's username and role from the token entity
         String authUsername = tokenEntity.getString("username");
         String authUserRole = tokenEntity.getString("role").toUpperCase();
 
-        // Validação: se o usuário autenticado for ENDUSER, só pode modificar a própria conta.
+        // If the authenticated user is an ENDUSER, they can only modify their own account.
         if ("ENDUSER".equals(authUserRole) && !authUsername.equals(data.getTargetUsername())) {
             return Response.status(Status.FORBIDDEN)
                     .entity("{\"error\": \"ENDUSER can only modify their own account\"}")
                     .build();
         }
 
-        // Se for BACKOFFICE: somente pode modificar contas cujo role seja ENDUSER ou PARTNER.
+        // If the authenticated user is BACKOFFICE, they can only modify accounts with role ENDUSER or PARTNER.
         Key targetUserKey = userKeyFactory.newKey(data.getTargetUsername());
         Entity targetUser = datastore.get(targetUserKey);
         if (targetUser == null) {
@@ -98,10 +103,10 @@ public class ChangeAccountAttributesResource {
             }
         }
 
-        // Inicie a construção da entidade atualizada, partindo da entidade já existente.
+        // Build an updated version of the user entity starting from the existing entity
         Entity.Builder builder = Entity.newBuilder(targetUser);
 
-        // Atualizações permitidas para todos os roles:
+        // Update fields that everyone is allowed to change
         if (data.getNewPhone() != null && !data.getNewPhone().isBlank()) {
             builder.set("user_phone", data.getNewPhone());
         }
@@ -127,8 +132,7 @@ public class ChangeAccountAttributesResource {
             builder.set("job_entity_nif", data.getNewJobEntityNif());
         }
 
-        // Atualizações controladas (atributos não permitem alteração por ENDUSER ou BACKOFFICE):
-        // Apenas ADMIN pode modificar: user_name, user_email, role, account_status
+        // Controlled updates: these fields can only be modified by ADMIN.
         if ("ADMIN".equals(authUserRole)) {
             if (data.getNewUserName() != null && !data.getNewUserName().isBlank()) {
                 builder.set("user_name", data.getNewUserName());
@@ -144,11 +148,12 @@ public class ChangeAccountAttributesResource {
             }
         }
 
+        // Build the updated user entity and save it in the datastore
         Entity updatedUser = builder.build();
         datastore.put(updatedUser);
         LOG.info("Account attributes updated for user " + data.getTargetUsername() + " by " + authUsername);
 
-        // Retorna os dados atualizados - aqui retornamos o objeto completo atualizado em JSON
+        // Return the updated user entity as JSON
         return Response.ok(g.toJson(updatedUser)).build();
     }
 }

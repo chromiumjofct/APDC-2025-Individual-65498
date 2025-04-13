@@ -2,11 +2,8 @@ package pt.unl.fct.di.apdc.firstwebapp.util;
 
 public class ChangePasswordData {
 
-    // Senha atual do usuário
     private String oldPassword;
-    // Nova senha
     private String newPassword;
-    // Confirmação da nova senha
     private String confirmPassword;
 
     public ChangePasswordData() {

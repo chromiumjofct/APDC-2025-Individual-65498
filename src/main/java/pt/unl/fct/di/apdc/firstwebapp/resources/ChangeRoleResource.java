@@ -26,24 +26,35 @@ import pt.unl.fct.di.apdc.firstwebapp.util.ChangeRoleData;
 @Consumes(MediaType.APPLICATION_JSON)
 public class ChangeRoleResource {
 
+    // Logger for resource events.
     private static final Logger LOG = Logger.getLogger(ChangeRoleResource.class.getName());
+
+    // Get the Datastore service instance.
     private static final Datastore datastore = DatastoreOptions.getDefaultInstance().getService();
-    // KeyFactory para entidades de tipo "User"
+
+    // KeyFactory for "User" entities.
     private static final KeyFactory userKeyFactory = datastore.newKeyFactory().setKind("User");
-    // KeyFactory para tokens – neste exemplo, supõe-se que a entidade do token é do tipo "AuthToken
+
+    // KeyFactory for "AuthToken" entities.
     private static final KeyFactory tokenKeyFactory = datastore.newKeyFactory().setKind("AuthToken");
 
+    // Gson instance to convert objects to JSON.
     private final Gson g = new Gson();
 
     /**
-     * Endpoint para mudança de role.
-     * Exemplo de uso:
-     * - O header "Authorization" deve conter: "Bearer <token>"
-     * - O corpo JSON deve conter targetUsername e newRole
+     * Endpoint for changing a user's role.
+     * <p>
+     * The request must include an Authorization header with a Bearer token and a JSON body
+     * containing:
+     * - targetUsername: the username of the target user.
+     * - newRole: the new role to assign.
+     * <p>
+     * ADMIN users can change any role.
+     * BACKOFFICE users can only swap roles between ENDUSER and PARTNER.
      */
     @POST
     public Response changeRole(@Context HttpHeaders headers, ChangeRoleData data) {
-        // Obtém o token do header Authorization
+        // Extract the token from the "Authorization" header.
         String authHeader = headers.getHeaderString("Authorization");
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             return Response.status(Status.FORBIDDEN)
@@ -57,9 +68,7 @@ public class ChangeRoleResource {
                     .build();
         }
 
-        // Procura o token na datastore;
-        // Supõe-se que durante o login foi criado um token armazenado com
-        // key igual ao token string.
+        // Look up the token entity using the token string as key.
         Key tokenKey = tokenKeyFactory.newKey(tokenStr);
         Entity tokenEntity = datastore.get(tokenKey);
         if (tokenEntity == null) {
@@ -68,7 +77,7 @@ public class ChangeRoleResource {
                     .build();
         }
 
-        // Verifica se o token ainda é válido (ex.: comparar o campo "expirationData" com o tempo atual)
+        // Check if the token is still valid by comparing its expiration timestamp with the current time.
         Timestamp validToTimestamp = tokenEntity.getTimestamp("valid_to");
         long expirationData = validToTimestamp.toDate().getTime();
         long currentTime = System.currentTimeMillis();
@@ -78,12 +87,11 @@ public class ChangeRoleResource {
                     .build();
         }
 
-        // Recupera o nome de utilizador e o role do token
+        // Retrieve the authenticated user's username and role from the token.
         String authUsername = tokenEntity.getString("username");
         String authUserRole = tokenEntity.getString("role");
 
-        // Para efeitos desta operação, verificamos se o utilizador autenticado tem
-        // permissão para mudar o role do utilizador alvo.
+        // Retrieve the target user entity from the datastore using the supplied targetUsername.
         Key targetUserKey = userKeyFactory.newKey(data.targetUsername);
         Entity targetUser = datastore.get(targetUserKey);
         if (targetUser == null) {
@@ -91,24 +99,23 @@ public class ChangeRoleResource {
                     .entity("{\"error\": \"Target user not found\"}")
                     .build();
         }
+
+        // Get the current role of the target user and convert the new role from the input to uppercase.
         String currentTargetRole = targetUser.getString("role");
         String newRole = data.newRole.toUpperCase();
 
-        // Verifica permissões:
+        // Check permissions based on the authenticated user's role.
         boolean allowed = false;
         if ("ADMIN".equals(authUserRole)) {
-            // ADMIN pode mudar qualquer role para qualquer role.
+            // ADMIN can change any role.
             allowed = true;
         } else if ("BACKOFFICE".equals(authUserRole)) {
-            // BACKOFFICE pode alterar apenas: ENDUSER <-> PARTNER
+            // BACKOFFICE can only toggle between ENDUSER and PARTNER.
             if ((currentTargetRole.equals("ENDUSER") && newRole.equals("PARTNER")) ||
                     (currentTargetRole.equals("PARTNER") && newRole.equals("ENDUSER"))) {
                 allowed = true;
             }
-        } else {
-            // Outros (por exemplo, ENDUSER) não têm permissão para mudar roles.
-            allowed = false;
-        }
+        } // ENDUSER and other roles are not permitted to change roles.
 
         if (!allowed) {
             return Response.status(Status.FORBIDDEN)
@@ -116,18 +123,16 @@ public class ChangeRoleResource {
                     .build();
         }
 
-        // Atualiza o role do utilizador alvo
+        // Update the target user's role.
         Entity updatedUser = Entity.newBuilder(targetUser)
                 .set("role", newRole)
                 .build();
         datastore.put(updatedUser);
         LOG.info("User role changed: " + data.targetUsername + " from " + currentTargetRole + " to " + newRole + " by " + authUsername);
 
-        // Retorna uma resposta com os dados atualizados do utilizador
-        // (neste exemplo, retorna o username e o novo role)
+        // Return a JSON response with the target username and its new role.
         String jsonResponse = String.format("{\"username\": \"%s\", \"newRole\": \"%s\"}",
                 updatedUser.getKey().getName(), updatedUser.getString("role"));
         return Response.ok(jsonResponse).build();
     }
 }
-

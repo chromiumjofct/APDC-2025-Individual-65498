@@ -10,16 +10,15 @@ public class RegisterData {
 	public String profile;
 	public String phone;
 
-	// Atributos adicionais opcionais
-	public String cc_number;      // Número de cartão do cidadão
-	public String nif;            // NIF do utilizador
-	public String job_entity;     // Entidade empregadora (ex.: Smart Forest S.A.)
-	public String job;            // Função (ex.: Professor, Estudante, etc.)
-	public String address;        // Morada (ex.: "Rua dos alunos de APDC2324, No 100, Piso 2, Porta 116")
-	public String job_entity_nif; // NIF da entidade empregadora
+	public String cc_number;
+	public String nif;
+	public String job_entity;
+	public String job;
+	public String address;
+	public String job_entity_nif;
 
 	public RegisterData() {
-		// Construtor padrão
+
 	}
 
 	public RegisterData(String username, String password, String confirmation, String email, String name,
